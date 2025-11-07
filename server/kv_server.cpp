@@ -84,6 +84,14 @@ svr.Get("/del", [db, cache](const Request& req, Response& res) {
     std::cout << "[DEL] key=" << key << std::endl;
 });
 
+    svr.Get("/dump", [db](const Request&, Response& res) {
+    std::ostringstream oss;
+    oss << "=== Database Dump ===\n";
+    for (const auto& p : db->getAll()) {
+        oss << p.first << " => " << p.second << "\n";
+    }
+    res.set_content(oss.str(), "text/plain");
+});
 
     cout << "Server running on port " << port << endl;
     svr.listen("0.0.0.0", port);

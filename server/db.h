@@ -53,4 +53,8 @@ public:
         for (auto& p : kv)
             file << p.first << " " << p.second << "\n";
     }
+        std::unordered_map<std::string, std::string> getAll() {
+        std::lock_guard<std::mutex> lock(mtx);
+        return kv;
+    }
 };
