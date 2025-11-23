@@ -19,81 +19,76 @@ int main(int argc, char** argv) {
 
     int port = stoi(argv[1]);
     int cache_capacity = stoi(argv[2]);
-
+    
+    // Postgres Connection String
+    string conn_str = "dbname=kv_store user=myuser password=ystg1234 host=localhost port=5433";
+    
+    // Initialize DB with a pool of 4 connections (matching thread pool size)
+    // Mode argument is removed because Postgres is inherently I/O bound compared to RAM
+    auto db = std::make_shared<DB>(conn_str, 4, false);
+    
     auto cache = std::make_shared<LRUCache<string, string>>(cache_capacity);
-auto db = std::make_shared<DB>("data.db");
-auto pool = std::make_shared<custom::ThreadPool>(4);
+    auto pool = std::make_shared<custom::ThreadPool>(4);
 
     Server svr;
 
-    
     svr.Get("/put", [db, cache, pool](const Request& req, Response& res) {
-    if (!req.has_param("key") || !req.has_param("val")) {
-        res.status = 400;
-        res.set_content("Missing key or val\n", "text/plain");
-        return;
-    }
+        if (!req.has_param("key") || !req.has_param("val")) {
+            res.status = 400;
+            return;
+        }
+        auto key = req.get_param_value("key");
+        auto val = req.get_param_value("val");
 
-    auto key = req.get_param_value("key");
-    auto val = req.get_param_value("val");
+        pool->enqueue([db, cache, key, val]() {
+            db->put(key, val);
+            cache->put(key, val);
+        });
 
-    pool->enqueue([db, cache, key, val]() {
-        db->put(key, val);
-        cache->put(key, val);
+        res.set_content("OK", "text/plain");
     });
 
-    res.set_content("OK\n", "text/plain");
-    std::cout << "[PUT] key=" << key << " val=" << val << std::endl;
-});
+    svr.Get("/get", [db, cache](const Request& req, Response& res) {
+        if (!req.has_param("key")) {
+            res.status = 400;
+            return;
+        }
+        auto key = req.get_param_value("key");
+        std::string val;
 
-svr.Get("/get", [db, cache](const Request& req, Response& res) {
-    if (!req.has_param("key")) {
-        res.status = 400;
-        res.set_content("Missing key\n", "text/plain");
-        return;
-    }
+        if (cache->get(key, val)) {
+            res.set_content(val, "text/plain");
+        } else if (db->get(key, val)) {
+            cache->put(key, val);
+            res.set_content(val, "text/plain");
+        } else {
+            res.status = 404;
+            res.set_content("Not Found", "text/plain");
+        }
+    });
 
-    auto key = req.get_param_value("key");
-    std::string val;
-
-    if (cache->get(key, val)) {
-        res.set_content(val, "text/plain");
-    } else if (db->get(key, val)) {
-        cache->put(key, val);
-        res.set_content(val, "text/plain");
-    } else {
-        res.status = 404;
-        res.set_content("Not Found", "text/plain");
-    }
-    std::cout << "[GET] key=" << key << std::endl;
-});
-
-svr.Get("/del", [db, cache](const Request& req, Response& res) {
-    if (!req.has_param("key")) {
-        res.status = 400;
-        res.set_content("Missing key\n", "text/plain");
-        return;
-    }
-
-    auto key = req.get_param_value("key");
-
-    db->del(key);
-    cache->del(key);
-
-    res.set_content("Deleted\n", "text/plain");
-    std::cout << "[DEL] key=" << key << std::endl;
-});
-
+    svr.Get("/del", [db, cache](const Request& req, Response& res) {
+        if (!req.has_param("key")) {
+            res.status = 400;
+            return;
+        }
+        auto key = req.get_param_value("key");
+        db->del(key);
+        cache->del(key);
+        res.set_content("Deleted", "text/plain");
+    });
+    
     svr.Get("/dump", [db](const Request&, Response& res) {
-    std::ostringstream oss;
-    oss << "=== Database Dump ===\n";
-    for (const auto& p : db->getAll()) {
-        oss << p.first << " => " << p.second << "\n";
-    }
-    res.set_content(oss.str(), "text/plain");
-});
+        std::ostringstream oss;
+        oss << "=== Database Dump (Postgres) ===\n";
+        auto all_data = db->getAll();
+        for (const auto& p : all_data) {
+            oss << p.first << " => " << p.second << "\n";
+        }
+        res.set_content(oss.str(), "text/plain");
+    });
 
-    cout << "Server running on port " << port << endl;
+    cout << "Server running on port " << port << " with PostgreSQL backend." << endl;
     svr.listen("0.0.0.0", port);
     return 0;
 }

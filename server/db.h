@@ -1,60 +1,118 @@
 #pragma once
-#include <fstream>
-#include <unordered_map>
 #include <string>
 #include <mutex>
 #include <iostream>
+#include <pqxx/pqxx>
+#include <queue>
+#include <memory>
+#include <condition_variable>
 
 class DB {
-    std::string filename;
-    std::unordered_map<std::string, std::string> kv;
-    std::mutex mtx;
+    std::string conn_string;
+    // Connection Pool
+    std::queue<std::shared_ptr<pqxx::connection>> connection_pool;
+    std::mutex pool_mtx;
+    std::condition_variable pool_cv;
+    
+    // To simulate latency if needed (optional now that we have real DB)
+    bool simulate_io_delay; 
 
 public:
-    DB(const std::string& fname) : filename(fname) {
-        std::ifstream file(filename);
-        std::string k, v;
-        while (file >> k >> v) kv[k] = v;
+    DB(const std::string& conn_str, int pool_size, bool io_delay) 
+        : conn_string(conn_str), simulate_io_delay(io_delay) {
+        
+        // Initialize Connection Pool
+        for (int i = 0; i < pool_size; ++i) {
+            try {
+                auto C = std::make_shared<pqxx::connection>(conn_string);
+                if (C->is_open()) {
+                    connection_pool.push(C);
+                } else {
+                    std::cerr << "[DB ERROR] Can't open database" << std::endl;
+                }
+            } catch (const std::exception &e) {
+                std::cerr << "[DB EXCEPTION] " << e.what() << std::endl;
+            }
+        }
+    }
+
+    // Helper to borrow a connection from the pool
+    std::shared_ptr<pqxx::connection> getConnection() {
+        std::unique_lock<std::mutex> lock(pool_mtx);
+        // Wait until a connection is available
+        pool_cv.wait(lock, [this] { return !connection_pool.empty(); });
+        
+        auto conn = connection_pool.front();
+        connection_pool.pop();
+        return conn;
+    }
+
+    // Helper to return a connection to the pool
+    void returnConnection(std::shared_ptr<pqxx::connection> conn) {
+        std::lock_guard<std::mutex> lock(pool_mtx);
+        connection_pool.push(conn);
+        pool_cv.notify_one();
     }
 
     void put(const std::string& k, const std::string& v) {
-        std::lock_guard<std::mutex> lock(mtx);
-        kv[k] = v;
-
-        std::ofstream file(filename, std::ios::trunc);
-        if (!file.is_open()) {
-            std::cerr << "[DB ERROR] Failed to open file for write\n";
-            return;
+        auto C = getConnection();
+        try {
+            pqxx::work W(*C);
+            // UPSERT logic: Insert, or Update if key exists
+            W.exec_params(
+                "INSERT INTO store (key_name, val_content) VALUES ($1, $2) "
+                "ON CONFLICT (key_name) DO UPDATE SET val_content = $2",
+                k, v
+            );
+            W.commit();
+        } catch (const std::exception &e) {
+            std::cerr << "[PUT ERROR] " << e.what() << std::endl;
         }
-
-        for (auto& p : kv) {
-            file << p.first << " " << p.second << "\n";
-        }
+        returnConnection(C);
     }
 
     bool get(const std::string& k, std::string& v) {
-        std::lock_guard<std::mutex> lock(mtx);
-        auto it = kv.find(k);
-        if (it == kv.end()) return false;
-        v = it->second;
-        return true;
+        auto C = getConnection();
+        bool found = false;
+        try {
+            pqxx::nontransaction N(*C);
+            pqxx::result R = N.exec_params("SELECT val_content FROM store WHERE key_name = $1", k);
+            
+            if (!R.empty()) {
+                v = R[0][0].c_str();
+                found = true;
+            }
+        } catch (const std::exception &e) {
+            std::cerr << "[GET ERROR] " << e.what() << std::endl;
+        }
+        returnConnection(C);
+        return found;
     }
 
     void del(const std::string& k) {
-        std::lock_guard<std::mutex> lock(mtx);
-        kv.erase(k);
-
-        std::ofstream file(filename, std::ios::trunc);
-        if (!file.is_open()) {
-            std::cerr << "[DB ERROR] Failed to open file for write\n";
-            return;
+        auto C = getConnection();
+        try {
+            pqxx::work W(*C);
+            W.exec_params("DELETE FROM store WHERE key_name = $1", k);
+            W.commit();
+        } catch (const std::exception &e) {
+            std::cerr << "[DEL ERROR] " << e.what() << std::endl;
         }
-
-        for (auto& p : kv)
-            file << p.first << " " << p.second << "\n";
+        returnConnection(C);
     }
-        std::unordered_map<std::string, std::string> getAll() {
-        std::lock_guard<std::mutex> lock(mtx);
-        return kv;
+    
+    // Helper for debugging (Not for load test)
+    std::vector<std::pair<std::string, std::string>> getAll() {
+        auto C = getConnection();
+        std::vector<std::pair<std::string, std::string>> result;
+        try {
+            pqxx::nontransaction N(*C);
+            pqxx::result R = N.exec("SELECT key_name, val_content FROM store");
+            for (auto row : R) {
+                result.push_back({row[0].c_str(), row[1].c_str()});
+            }
+        } catch (...) {}
+        returnConnection(C);
+        return result;
     }
 };

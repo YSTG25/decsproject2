@@ -1,0 +1,4 @@
+/home/ystg/Desktop/DECS/build/CMakeFiles/kv_server.dir
+/home/ystg/Desktop/DECS/build/CMakeFiles/loadgen.dir
+/home/ystg/Desktop/DECS/build/CMakeFiles/edit_cache.dir
+/home/ystg/Desktop/DECS/build/CMakeFiles/rebuild_cache.dir

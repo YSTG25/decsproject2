@@ -1,0 +1,4 @@
+Workload,Threads,Throughput,Avg_Latency,P99_Latency,Server_CPU_Util,DB_Disk_Util
+Read_Heavy,80,19290.15,5.17,2.84,79.89,29.92
+Write_Heavy,80,18131.00,5.24,2.44,85.89,30.72
+Balanced,80,16728.62,5.98,5.33,78.00,31.69

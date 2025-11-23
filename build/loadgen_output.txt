@@ -1,0 +1,7 @@
+Starting Load Test with 80 threads for 60s...
+=== Results (Steady State) ===
+Concurrency (Load): 80
+Throughput:         16728.62 req/s
+Avg Latency:        5.98 ms
+P50 Latency:        0.40 ms
+P99 Latency:        5.33 ms
