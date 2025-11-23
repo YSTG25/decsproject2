@@ -1,0 +1,61 @@
+important commands
+# Update package list
+sudo apt update
+
+# Install build tools (C++ compiler, CMake, Make)
+sudo apt install build-essential cmake
+
+# Install PostgreSQL database & development headers
+sudo apt install postgresql libpqxx-dev
+
+# Install monitoring utilities (needed for benchmark script)
+sudo apt install sysstat bc
+
+# Start the Postgres service
+sudo systemctl start postgresql
+
+# Switch to the default postgres user
+sudo -u postgres psql
+
+# -- Inside the SQL Shell --
+CREATE USER myuser WITH PASSWORD 'ystg1234';
+CREATE DATABASE kv_store OWNER myuser;
+\c kv_store;
+
+# Create the required table
+CREATE TABLE store (
+    key_name TEXT PRIMARY KEY,
+    val_content TEXT
+);
+
+# Exit SQL shell
+\q
+# Create a build directory
+mkdir -p build
+cd build
+
+# Generate Makefiles
+cmake ..
+
+# Compile (creates 'kv_server' and 'loadgen')
+make
+
+
+# Syntax: ./kv_server <PORT> <CACHE_CAPACITY>
+# (Pinned to first 4 cores)
+taskset -c 0-3 ./kv_server 8080 1000
+
+# Write Data
+curl "http://127.0.0.1:8080/put?key=test&val=123"
+
+# Read Data
+curl "http://127.0.0.1:8080/get?key=test"
+
+# Delete Data
+curl "http://127.0.0.1:8080/del?key=test"
+
+# Check row count directly via SQL
+PGPASSWORD=ystg1234 psql -U myuser -d kv_store -h localhost -p 5433 -c "SELECT COUNT(*) FROM store;"
+
+# Clear all data (Truncate)
+PGPASSWORD=ystg1234 psql -U myuser -d kv_store -h localhost -p 5433 -c "TRUNCATE store;"

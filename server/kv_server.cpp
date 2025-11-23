@@ -19,12 +19,7 @@ int main(int argc, char** argv) {
 
     int port = stoi(argv[1]);
     int cache_capacity = stoi(argv[2]);
-    
-    // Postgres Connection String
     string conn_str = "dbname=kv_store user=myuser password=ystg1234 host=localhost port=5433";
-    
-    // Initialize DB with a pool of 4 connections (matching thread pool size)
-    // Mode argument is removed because Postgres is inherently I/O bound compared to RAM
     auto db = std::make_shared<DB>(conn_str, 4, false);
     
     auto cache = std::make_shared<LRUCache<string, string>>(cache_capacity);

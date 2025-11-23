@@ -9,19 +9,16 @@
 
 class DB {
     std::string conn_string;
-    // Connection Pool
     std::queue<std::shared_ptr<pqxx::connection>> connection_pool;
     std::mutex pool_mtx;
     std::condition_variable pool_cv;
     
-    // To simulate latency if needed (optional now that we have real DB)
     bool simulate_io_delay; 
 
 public:
     DB(const std::string& conn_str, int pool_size, bool io_delay) 
         : conn_string(conn_str), simulate_io_delay(io_delay) {
         
-        // Initialize Connection Pool
         for (int i = 0; i < pool_size; ++i) {
             try {
                 auto C = std::make_shared<pqxx::connection>(conn_string);
@@ -36,18 +33,14 @@ public:
         }
     }
 
-    // Helper to borrow a connection from the pool
     std::shared_ptr<pqxx::connection> getConnection() {
         std::unique_lock<std::mutex> lock(pool_mtx);
-        // Wait until a connection is available
         pool_cv.wait(lock, [this] { return !connection_pool.empty(); });
         
         auto conn = connection_pool.front();
         connection_pool.pop();
         return conn;
     }
-
-    // Helper to return a connection to the pool
     void returnConnection(std::shared_ptr<pqxx::connection> conn) {
         std::lock_guard<std::mutex> lock(pool_mtx);
         connection_pool.push(conn);
@@ -58,7 +51,6 @@ public:
         auto C = getConnection();
         try {
             pqxx::work W(*C);
-            // UPSERT logic: Insert, or Update if key exists
             W.exec_params(
                 "INSERT INTO store (key_name, val_content) VALUES ($1, $2) "
                 "ON CONFLICT (key_name) DO UPDATE SET val_content = $2",
@@ -101,7 +93,6 @@ public:
         returnConnection(C);
     }
     
-    // Helper for debugging (Not for load test)
     std::vector<std::pair<std::string, std::string>> getAll() {
         auto C = getConnection();
         std::vector<std::pair<std::string, std::string>> result;
